@@ -1,0 +1,612 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// TOOTH X — Esquema de Base de Datos con Prisma
+// ═══════════════════════════════════════════════════════════════════════════════
+// Nota: RLS (Row Level Security) se activa directamente en Supabase después de
+// crear las tablas. Este schema es la estructura base.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: TENANTS (Consultorios)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tabla central que representa cada consultorio independiente en la plataforma.
+// Cada tenant es una instancia completamente aislada de datos.
+
+model Tenant {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                String    @db.VarChar(255) // Nombre del consultorio
+  slug                String    @unique @db.VarChar(255) // Identificador único URL-friendly
+  ruc                 String?   @db.VarChar(20) // Número fiscal (RUC en Perú)
+  address             String?   @db.Text // Dirección física del consultorio
+  phone               String?   @db.VarChar(20) // Teléfono de contacto
+  country             String    @default("PE") @db.VarChar(2) // Código de país ISO
+  logo_url            String?   @db.VarChar(500) // URL del logo en Supabase Storage
+  
+  // Personalización de marca (theming dinámico)
+  primary_color       String    @default("#1D4ED8") @db.VarChar(7) // Color primario en hex
+  secondary_color     String    @default("#0F766E") @db.VarChar(7) // Color secundario en hex
+  font_family         String    @default("Inter") @db.VarChar(50) // Tipografía del consultorio
+  
+  // Plan de suscripción
+  plan                String    @default("basico") @db.VarChar(50) // basico | pro | premium
+  plan_expires_at     DateTime? @db.Timestamptz // Fecha de vencimiento del plan
+  
+  // Estado del consultorio
+  is_active           Boolean   @default(true) // Si está activo o suspendido
+  onboarding_complete Boolean   @default(false) // Si completó el wizard de configuración
+  
+  // Configuración de horarios (JSON flexible para días y horas)
+  horarios_atencion   Json? // {"lunes":{"activo":true,"inicio":"08:00","fin":"18:00"},...}
+  
+  // Configuración general
+  duracion_cita_min   Int       @default(45) // Duración por defecto de citas en minutos
+  
+  // Auditoría
+  created_at          DateTime  @default(now()) @db.Timestamptz
+  updated_at          DateTime  @updatedAt @db.Timestamptz
+
+  // Relaciones
+  users               User[]
+  pacientes           Paciente[]
+  citas               Cita[]
+  evoluciones         Evolucion[]
+  odontograma_items   OdontogramaItem[]
+  plan_items          PlanTratamientoItem[]
+  facturas            Factura[]
+  factura_items       FacturaItem[]
+  pagos               Pago[]
+  gastos              Gasto[]
+  equipos             Equipo[]
+  insumos             Insumo[]
+  movimientos_insumo  MovimientoInsumo[]
+  documentos          DocumentoAdjunto[]
+
+  @@index([slug])
+  @@map("tenants")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: USERS (Usuarios del Consultorio)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Usuarios activos del consultorio: admin, odontólogos y secretarias.
+// Cada usuario vinculado a exactamente un consultorio (tenant_id).
+
+model User {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String    @db.Uuid // Consultorio al que pertenece
+  supabase_auth_id    String    @unique @db.Uuid // ID del usuario en Supabase Auth
+  email               String    @db.VarChar(255) // Email único a nivel de BD
+  full_name           String    @db.VarChar(255) // Nombre completo
+  app_role            String    @db.VarChar(50) // admin | doctor | secretary | super_admin
+  specialty           String?   @db.VarChar(100) // Especialidad odontológica (ej: "Periodoncia")
+  photo_url           String?   @db.VarChar(500) // URL de foto de perfil
+  
+  // PIN de voz para login rápido en tablet
+  voice_pin_hash      String?   @db.VarChar(255) // Hash bcrypt del PIN de 4 dígitos
+  voice_pin_attempts  Int       @default(0) // Intentos fallidos. Bloquea en 3.
+  
+  // Estado del usuario
+  is_active           Boolean   @default(true) // Soft delete: false = desactivado
+  
+  // Invitación por email
+  invitation_token    String?   @unique @db.VarChar(255) // Token temporal para activar cuenta
+  invitation_expires  DateTime? @db.Timestamptz // Fecha de expiración del token
+  
+  // Auditoría
+  created_at          DateTime  @default(now()) @db.Timestamptz
+  updated_at          DateTime  @updatedAt @db.Timestamptz
+
+  // Relaciones
+  tenant              Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  citas_como_doctor   Cita[]    @relation("CitaDoctor")
+  citas_created_by    Cita[]    @relation("CitaCreatedBy")
+  evoluciones         Evolucion[] @relation("EvolucionDoctor")
+  evoluciones_updated Evolucion[] @relation("EvolucionUpdatedBy")
+  odontograma_items   OdontogramaItem[]
+  pacientes_created   Paciente[] @relation("PacienteCreatedBy")
+  gastos              Gasto[]
+  pagos               Pago[]
+  documentos          DocumentoAdjunto[]
+
+  @@unique([tenant_id, email]) // Email único por tenant
+  @@index([tenant_id])
+  @@index([supabase_auth_id])
+  @@map("users")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: PACIENTES
+// ═══════════════════════════════════════════════════════════════════════════════
+// Pacientes del consultorio. Todos los datos clínicos, contacto y antecedentes.
+
+model Paciente {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String    @db.Uuid
+  
+  // Datos personales
+  nombres             String    @db.VarChar(100)
+  apellidos           String    @db.VarChar(100)
+  tipo_documento      String?   @db.VarChar(20) // DNI | CE | pasaporte
+  numero_documento    String?   @db.VarChar(30)
+  fecha_nacimiento    DateTime? @db.Date
+  sexo                String?   @db.VarChar(1) // M | F | O
+  
+  // Contacto
+  telefono            String?   @db.VarChar(20)
+  email               String?   @db.VarChar(255)
+  direccion           String?   @db.Text
+  
+  // Información médica
+  grupo_sanguineo     String?   @db.VarChar(5) // O+ | O- | A+ | A- | B+ | B- | AB+ | AB-
+  alergias            String?   @db.Text
+  antecedentes_medicos String?  @db.Text
+  
+  // Foto de perfil
+  foto_url            String?   @db.VarChar(500)
+  
+  // Estado
+  is_active           Boolean   @default(true) // Soft delete
+  
+  // Auditoría
+  created_by          String?   @db.Uuid
+  created_at          DateTime  @default(now()) @db.Timestamptz
+  updated_at          DateTime  @updatedAt @db.Timestamptz
+
+  // Relaciones
+  tenant              Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  created_by_user     User?     @relation("PacienteCreatedBy", fields: [created_by], references: [id])
+  citas               Cita[]
+  evoluciones         Evolucion[]
+  odontograma_items   OdontogramaItem[]
+  plan_items          PlanTratamientoItem[]
+  facturas            Factura[]
+  gastos_laboratorio  Gasto[]
+  documentos          DocumentoAdjunto[]
+
+  @@unique([tenant_id, numero_documento])
+  @@index([tenant_id])
+  @@index([apellidos])
+  @@map("pacientes")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: CITAS (Agenda)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Citas agendadas del consultorio. Incluye estados y tracking de notificaciones.
+
+model Cita {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String    @db.Uuid
+  paciente_id         String    @db.Uuid
+  doctor_id           String    @db.Uuid // Usuario que atiende
+  created_by          String?   @db.Uuid // Usuario que creó la cita
+  
+  // Fecha y hora
+  fecha_hora_inicio   DateTime  @db.Timestamptz
+  fecha_hora_fin      DateTime  @db.Timestamptz
+  duracion_min        Int       @default(45)
+  
+  // Contenido
+  motivo              String?   @db.VarChar(255)
+  notas               String?   @db.Text
+  estado              String    @default("programada") @db.VarChar(50)
+    // programada | confirmada | en_curso | completada | cancelada | no_asistio
+  
+  // Tracking de notificaciones
+  email_confirmacion_enviado    Boolean @default(false)
+  email_recordatorio_enviado    Boolean @default(false)
+  whatsapp_confirmacion_enviado Boolean @default(false)
+  whatsapp_recordatorio_enviado Boolean @default(false)
+  
+  // Auditoría
+  created_at          DateTime  @default(now()) @db.Timestamptz
+  updated_at          DateTime  @updatedAt @db.Timestamptz
+
+  // Relaciones
+  tenant              Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  paciente            Paciente  @relation(fields: [paciente_id], references: [id], onDelete: Cascade)
+  doctor              User      @relation("CitaDoctor", fields: [doctor_id], references: [id])
+  created_by_user     User?     @relation("CitaCreatedBy", fields: [created_by], references: [id])
+  evoluciones         Evolucion[]
+
+  @@index([tenant_id])
+  @@index([tenant_id, fecha_hora_inicio])
+  @@index([paciente_id])
+  @@index([doctor_id])
+  @@map("citas")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: EVOLUCIONES (Historia Clínica)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Registro clínico de cada consulta. Incluye motivo, anamnesis, diagnóstico, etc.
+
+model Evolucion {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String    @db.Uuid
+  paciente_id         String    @db.Uuid
+  doctor_id           String    @db.Uuid // Médico que registra
+  cita_id             String?   @db.Uuid // Cita que originó esta evolución
+  
+  // Datos clínicos
+  fecha               DateTime  @default(now()) @db.Date
+  motivo_consulta     String    @db.VarChar(255)
+  anamnesis           String?   @db.Text
+  examen_clinico      String?   @db.Text
+  diagnostico         String?   @db.Text
+  plan_tratamiento_texto String? @db.Text
+  notas               String?   @db.Text
+  
+  // Auditoría
+  created_at          DateTime  @default(now()) @db.Timestamptz
+  updated_at          DateTime  @updatedAt @db.Timestamptz
+  updated_by          String?   @db.Uuid
+
+  // Relaciones
+  tenant              Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  paciente            Paciente  @relation(fields: [paciente_id], references: [id], onDelete: Cascade)
+  doctor              User      @relation("EvolucionDoctor", fields: [doctor_id], references: [id])
+  cita                Cita?     @relation(fields: [cita_id], references: [id], onDelete: SetNull)
+  updated_by_user     User?     @relation("EvolucionUpdatedBy", fields: [updated_by], references: [id])
+  odontograma_items   OdontogramaItem[]
+  plan_items          PlanTratamientoItem[]
+  documentos          DocumentoAdjunto[]
+
+  @@index([tenant_id])
+  @@index([paciente_id])
+  @@index([doctor_id])
+  @@map("evoluciones")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: ODONTOGRAMA_ITEMS (Hallazgos Clínicos por Diente)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Cada hallazgo registrado en el odontograma: condición, diente, superficie.
+
+model OdontogramaItem {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String    @db.Uuid
+  paciente_id         String    @db.Uuid
+  evolucion_id        String?   @db.Uuid
+  
+  // Referencia al diente
+  numero_diente       Int       // 11-48 adulto | 51-85 pediátrico (notación FDI)
+  superficie          String    @db.VarChar(50) // oclusal | vestibular | palatino | mesial | distal | total
+  
+  // Hallazgo
+  condicion           String    @db.VarChar(50) 
+    // caries | obturacion | corona | ausente | fractura | implante | endodoncia | sellante | protesis | sano
+  tratamiento         String?   @db.VarChar(255)
+  notas               String?   @db.Text
+  color_display       String?   @db.VarChar(7) // Hex del color mostrado en SVG
+  
+  // Auditoría
+  registrado_por      String?   @db.Uuid
+  fecha_registro      DateTime  @default(now()) @db.Timestamptz
+
+  // Relaciones
+  tenant              Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  paciente            Paciente  @relation(fields: [paciente_id], references: [id], onDelete: Cascade)
+  evolucion           Evolucion? @relation(fields: [evolucion_id], references: [id], onDelete: SetNull)
+  registrado_por_user User?     @relation(fields: [registrado_por], references: [id])
+
+  @@index([tenant_id])
+  @@index([paciente_id])
+  @@index([numero_diente])
+  @@map("odontograma_items")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: PLAN_TRATAMIENTO_ITEMS (Ítems del Plan de Tratamiento)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Cada procedimiento planificado para un paciente dentro de una evolución.
+
+model PlanTratamientoItem {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String    @db.Uuid
+  evolucion_id        String    @db.Uuid
+  paciente_id         String    @db.Uuid
+  
+  numero_diente       Int? // Diente al que aplica (opcional)
+  descripcion         String    @db.VarChar(255) // Nombre del procedimiento
+  estado              String    @default("pendiente") @db.VarChar(50)
+    // pendiente | en_progreso | completado
+  costo_estimado      Decimal   @default(0) @db.Decimal(10, 2)
+  orden               Int       @default(0) // Orden de ejecución
+  
+  created_at          DateTime  @default(now()) @db.Timestamptz
+  updated_at          DateTime  @updatedAt @db.Timestamptz
+
+  // Relaciones
+  tenant              Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  evolucion           Evolucion @relation(fields: [evolucion_id], references: [id], onDelete: Cascade)
+  paciente            Paciente  @relation(fields: [paciente_id], references: [id], onDelete: Cascade)
+  factura_items       FacturaItem[]
+
+  @@index([tenant_id])
+  @@index([evolucion_id])
+  @@index([paciente_id])
+  @@map("plan_tratamiento_items")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: FACTURAS
+// ═══════════════════════════════════════════════════════════════════════════════
+// Facturas emitidas a pacientes por servicios y procedimientos.
+
+model Factura {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String    @db.Uuid
+  paciente_id         String    @db.Uuid
+  doctor_id           String?   @db.Uuid
+  created_by          String?   @db.Uuid
+  
+  numero_factura      Int       // Correlativo por tenant, reinicia en 1
+  fecha_emision       DateTime  @default(now()) @db.Date
+  
+  // Montos
+  subtotal            Decimal   @default(0) @db.Decimal(12, 2)
+  descuento_global    Decimal   @default(0) @db.Decimal(12, 2)
+  descuento_tipo      String    @default("monto") @db.VarChar(20) // monto | porcentaje
+  total               Decimal   @default(0) @db.Decimal(12, 2)
+  
+  // Pagos
+  monto_pagado        Decimal   @default(0) @db.Decimal(12, 2)
+  saldo_pendiente     Decimal   @default(0) @db.Decimal(12, 2)
+  estado              String    @default("pendiente") @db.VarChar(50)
+    // pendiente | parcial | pagada | cancelada
+  
+  notas               String?   @db.Text
+  
+  created_at          DateTime  @default(now()) @db.Timestamptz
+  updated_at          DateTime  @updatedAt @db.Timestamptz
+
+  // Relaciones
+  tenant              Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  paciente            Paciente  @relation(fields: [paciente_id], references: [id], onDelete: Cascade)
+  doctor              User?     @relation(fields: [doctor_id], references: [id])
+  created_by_user     User?     @relation(fields: [created_by], references: [id])
+  items               FacturaItem[]
+  pagos               Pago[]
+
+  @@unique([tenant_id, numero_factura])
+  @@index([tenant_id])
+  @@index([paciente_id])
+  @@map("facturas")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: FACTURA_ITEMS
+// ═══════════════════════════════════════════════════════════════════════════════
+// Ítems individuales de cada factura.
+
+model FacturaItem {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  factura_id            String    @db.Uuid
+  tenant_id             String    @db.Uuid
+  plan_item_id          String?   @db.Uuid // Vínculo al plan (opcional)
+  
+  descripcion           String    @db.VarChar(255)
+  cantidad              Decimal   @default(1) @db.Decimal(10, 2)
+  valor_unitario        Decimal   @default(0) @db.Decimal(12, 2)
+  descuento_item        Decimal   @default(0) @db.Decimal(12, 2)
+  valor_total           Decimal   @default(0) @db.Decimal(12, 2)
+
+  // Relaciones
+  factura               Factura   @relation(fields: [factura_id], references: [id], onDelete: Cascade)
+  tenant                Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  plan_item             PlanTratamientoItem? @relation(fields: [plan_item_id], references: [id])
+
+  @@index([factura_id])
+  @@index([tenant_id])
+  @@map("factura_items")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: PAGOS (Historial de Pagos por Factura)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Registro de cada pago recibido por una factura (permite pagos parciales).
+
+model Pago {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  factura_id          String    @db.Uuid
+  tenant_id           String    @db.Uuid
+  
+  monto               Decimal   @db.Decimal(12, 2)
+  metodo_pago         String    @db.VarChar(50) // efectivo | transferencia | tarjeta | cuotas
+  fecha_pago          DateTime  @default(now()) @db.Date
+  referencia          String?   @db.VarChar(255) // Número de transacción, voucher, etc.
+  notas               String?   @db.Text
+  
+  registered_by       String?   @db.Uuid
+  created_at          DateTime  @default(now()) @db.Timestamptz
+
+  // Relaciones
+  factura             Factura   @relation(fields: [factura_id], references: [id], onDelete: Cascade)
+  tenant              Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  registered_by_user  User?     @relation(fields: [registered_by], references: [id])
+
+  @@index([factura_id])
+  @@index([tenant_id])
+  @@map("pagos")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: GASTOS (Gestión Financiera)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Todos los gastos operativos del consultorio (fijos y variables).
+
+model Gasto {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String    @db.Uuid
+  
+  tipo                String    @db.VarChar(50) // fijo | variable
+  categoria           String    @db.VarChar(50)
+    // arriendo | sueldos | servicios | seguros | suscripciones | otros_fijos
+    // laboratorio | mantenimiento | marketing | capacitacion | otros_variables
+  
+  descripcion         String    @db.VarChar(255)
+  monto               Decimal   @db.Decimal(12, 2)
+  fecha               DateTime  @db.Date
+  
+  es_recurrente       Boolean   @default(false) // Se registra automáticamente cada mes
+  paciente_id         String?   @db.Uuid // Para laboratorio dental vinculado a paciente
+  plan_item_id        String?   @db.Uuid // Para laboratorio vinculado a tratamiento
+  
+  notas               String?   @db.Text
+  
+  created_by          String?   @db.Uuid
+  created_at          DateTime  @default(now()) @db.Timestamptz
+  updated_at          DateTime  @updatedAt @db.Timestamptz
+
+  // Relaciones
+  tenant              Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  paciente            Paciente? @relation(fields: [paciente_id], references: [id], onDelete: SetNull)
+  plan_item           PlanTratamientoItem? @relation(fields: [plan_item_id], references: [id])
+  created_by_user     User?     @relation(fields: [created_by], references: [id])
+
+  @@index([tenant_id])
+  @@index([fecha])
+  @@map("gastos")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: EQUIPOS (Inventario de Equipos Clínicos)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Equipos con depreciación lineal automática.
+
+model Equipo {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String    @db.Uuid
+  
+  nombre              String    @db.VarChar(255)
+  categoria           String?   @db.VarChar(50) // equipo_clinico | mobiliario | tecnologia
+  marca               String?   @db.VarChar(100)
+  modelo              String?   @db.VarChar(100)
+  serial              String?   @db.VarChar(100)
+  proveedor           String?   @db.VarChar(255)
+  
+  fecha_compra        DateTime? @db.Date
+  valor_compra        Decimal   @db.Decimal(12, 2)
+  valor_residual      Decimal   @default(0) @db.Decimal(12, 2) // Valor al final de vida útil
+  vida_util_anios     Int       // Años para calcular depreciación lineal
+  
+  estado              String    @default("activo") @db.VarChar(50) // activo | en_mantenimiento | dado_de_baja
+  notas               String?   @db.Text
+  foto_url            String?   @db.VarChar(500)
+  
+  created_by          String?   @db.Uuid
+  created_at          DateTime  @default(now()) @db.Timestamptz
+  updated_at          DateTime  @updatedAt @db.Timestamptz
+
+  // Relaciones
+  tenant              Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  created_by_user     User?     @relation(fields: [created_by], references: [id])
+
+  @@index([tenant_id])
+  @@map("equipos")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: INSUMOS (Inventario de Insumos Consumibles)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Insumos con control de stock y alertas de nivel mínimo.
+
+model Insumo {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String    @db.Uuid
+  
+  nombre              String    @db.VarChar(255)
+  categoria           String?   @db.VarChar(50) // anestesia | materiales_restauracion | instrumental
+  unidad_medida       String    @db.VarChar(50) // unidad | caja | frasco | rollo | par | ml | gr
+  
+  stock_actual        Decimal   @default(0) @db.Decimal(10, 2)
+  stock_minimo        Decimal   @default(0) @db.Decimal(10, 2)
+  precio_unitario     Decimal   @default(0) @db.Decimal(10, 2)
+  
+  proveedor           String?   @db.VarChar(255)
+  is_active           Boolean   @default(true)
+  
+  created_at          DateTime  @default(now()) @db.Timestamptz
+  updated_at          DateTime  @updatedAt @db.Timestamptz
+
+  // Relaciones
+  tenant              Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  movimientos         MovimientoInsumo[]
+
+  @@index([tenant_id])
+  @@map("insumos")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: MOVIMIENTOS_INSUMO (Entrada/Salida de Insumos)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Trazabilidad completa de entrada y salida de insumos.
+
+model MovimientoInsumo {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  insumo_id           String    @db.Uuid
+  tenant_id           String    @db.Uuid
+  
+  tipo                String    @db.VarChar(50) // entrada | salida
+  cantidad            Decimal   @db.Decimal(10, 2)
+  precio_unitario_entrada Decimal? @db.Decimal(10, 2) // Precio de compra
+  stock_resultante    Decimal   @db.Decimal(10, 2) // Stock después del movimiento
+  
+  proveedor           String?   @db.VarChar(255) // Solo para entradas
+  paciente_id         String?   @db.Uuid // Solo para salidas vinculadas a paciente
+  
+  fecha               DateTime  @default(now()) @db.Date
+  notas               String?   @db.Text
+  
+  registered_by       String?   @db.Uuid
+  created_at          DateTime  @default(now()) @db.Timestamptz
+
+  // Relaciones
+  insumo              Insumo    @relation(fields: [insumo_id], references: [id], onDelete: Cascade)
+  tenant              Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  paciente            Paciente? @relation(fields: [paciente_id], references: [id], onDelete: SetNull)
+  registered_by_user  User?     @relation(fields: [registered_by], references: [id])
+
+  @@index([insumo_id])
+  @@index([tenant_id])
+  @@map("movimientos_insumo")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TABLA: DOCUMENTOS_ADJUNTOS
+// ═══════════════════════════════════════════════════════════════════════════════
+// Radiografías, imágenes clínicas y documentos adjuntos del paciente.
+
+model DocumentoAdjunto {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String    @db.Uuid
+  paciente_id         String    @db.Uuid
+  evolucion_id        String?   @db.Uuid
+  
+  nombre_archivo      String    @db.VarChar(255)
+  tipo_archivo        String    @db.VarChar(50) // image/jpeg | image/png | application/pdf
+  storage_url         String    @db.VarChar(500) // URL en Supabase Storage
+  tamanio_bytes       Int?
+  
+  uploaded_by         String?   @db.Uuid
+  created_at          DateTime  @default(now()) @db.Timestamptz
+
+  // Relaciones
+  tenant              Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  paciente            Paciente  @relation(fields: [paciente_id], references: [id], onDelete: Cascade)
+  evolucion           Evolucion? @relation(fields: [evolucion_id], references: [id], onDelete: SetNull)
+  uploaded_by_user    User?     @relation(fields: [uploaded_by], references: [id])
+
+  @@index([tenant_id])
+  @@index([paciente_id])
+  @@map("documentos_adjuntos")
+}

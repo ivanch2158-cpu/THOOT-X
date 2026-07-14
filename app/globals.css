@@ -1,0 +1,44 @@
+/* ═══════════════════════════════════════════════════════════════════════════════
+   GLOBAL STYLES — Estilos globales de TOOTH X
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* Scroll bar personalizado */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+}
+
+/* Input focus outline */
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+}
+
+/* Placeholder text */
+::placeholder {
+  color: var(--color-text-disabled);
+}
+
+/* Selección de texto */
+::selection {
+  background-color: var(--color-primary);
+  color: var(--color-text-inverse);
+}
