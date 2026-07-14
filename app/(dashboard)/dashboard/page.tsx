@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { formatCurrency } from '@/lib/utils/format';
-import { UserRole } from '@/lib/auth/protect';
+import { UserRole } from '@/lib/auth/roles';
 
 // ── TIPOS ─────────────────────────────────────────────────────────────────────
 

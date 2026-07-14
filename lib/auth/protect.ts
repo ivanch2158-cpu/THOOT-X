@@ -3,16 +3,10 @@
 
 import { createServerClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { UserRole } from './roles';
 
-/**
- * Tipos de roles en el sistema
- */
-export enum UserRole {
-  SUPER_ADMIN = 'super_admin',        // Admin global de TOOTH X
-  ADMIN = 'admin',                     // Admin del consultorio
-  ODONTOLOGIST = 'odontologist',       // Odontólogo
-  SECRETARY = 'secretary',             // Secretaria
-}
+// Re-exportar para que los API routes existentes no necesiten cambios
+export { UserRole };
 
 /**
  * Estructura de usuario autenticado
