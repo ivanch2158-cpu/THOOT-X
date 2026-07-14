@@ -21,7 +21,7 @@ export async function GET(
     ]);
 
     if (!isValid) {
-      return response;
+      return response!;
     }
 
     const supabase = await createServerClient();
@@ -76,7 +76,7 @@ export async function PUT(
     ]);
 
     if (!isValid) {
-      return response;
+      return response!;
     }
 
     const body = await request.json();
@@ -172,7 +172,7 @@ export async function DELETE(
     ]);
 
     if (!isValid) {
-      return response;
+      return response!;
     }
 
     const supabase = await createServerClient();

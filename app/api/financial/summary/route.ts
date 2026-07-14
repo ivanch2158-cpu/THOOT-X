@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     ]);
 
     if (!isValid) {
-      return response;
+      return response!;
     }
 
     const resumen = await calcularResumenDashboard(user!.tenantId);

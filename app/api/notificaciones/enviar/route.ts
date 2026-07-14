@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       UserRole.SECRETARY,
     ]);
 
-    if (!isValid) return response;
+    if (!isValid) return response!;
 
     const body = await request.json();
     const validation = enviarSchema.safeParse(body);

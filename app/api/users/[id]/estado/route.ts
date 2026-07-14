@@ -14,7 +14,7 @@ export async function PATCH(
 ) {
   try {
     const { isValid, user, response } = await protectEndpoint(request, [UserRole.ADMIN]);
-    if (!isValid) return response;
+    if (!isValid) return response!;
 
     // El admin no puede desactivarse a sí mismo
     if (params.id === user!.id) {

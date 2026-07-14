@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     ]);
 
     if (!isValid) {
-      return response;
+      return response!;
     }
 
     const { searchParams } = new URL(request.url);

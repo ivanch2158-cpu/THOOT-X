@@ -8,7 +8,6 @@ import { PatientList } from '@/components/patients/PatientList';
 import { PatientForm } from '@/components/patients/PatientForm';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, X } from 'lucide-react';
 
 interface Patient {
   id: string;

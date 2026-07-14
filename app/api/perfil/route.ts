@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     const { isValid, user, response } = await protectEndpoint(request, [
       UserRole.ADMIN, UserRole.ODONTOLOGIST, UserRole.SECRETARY,
     ]);
-    if (!isValid) return response;
+    if (!isValid) return response!;
 
     const supabase = await createServerClient();
     const { data, error } = await supabase
@@ -37,7 +37,7 @@ export async function PUT(request: NextRequest) {
     const { isValid, user, response } = await protectEndpoint(request, [
       UserRole.ADMIN, UserRole.ODONTOLOGIST, UserRole.SECRETARY,
     ]);
-    if (!isValid) return response;
+    if (!isValid) return response!;
 
     const body = await request.json();
     const validation = putSchema.safeParse(body);

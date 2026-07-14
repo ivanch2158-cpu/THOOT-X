@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     ]);
 
     if (!isValid) {
-      return response;
+      return response!;
     }
 
     const supabase = await createServerClient();
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
     ]);
 
     if (!isValid) {
-      return response;
+      return response!;
     }
 
     // Validar datos

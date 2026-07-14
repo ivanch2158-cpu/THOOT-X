@@ -19,7 +19,7 @@ const schema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const { isValid, user, response } = await protectEndpoint(request, [UserRole.ADMIN]);
-    if (!isValid) return response;
+    if (!isValid) return response!;
 
     const body = await request.json();
     const validation = schema.safeParse(body);

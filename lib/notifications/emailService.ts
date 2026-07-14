@@ -4,7 +4,16 @@
 
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Instanciación perezosa: evita fallar en build time cuando RESEND_API_KEY no está configurada
+let resendClient: Resend | null = null;
+
+function getResendClient(): Resend | null {
+  if (!process.env.RESEND_API_KEY) return null;
+  if (!resendClient) {
+    resendClient = new Resend(process.env.RESEND_API_KEY);
+  }
+  return resendClient;
+}
 
 // ── TIPOS ─────────────────────────────────────────────────────────────────────
 
@@ -217,6 +226,12 @@ export async function sendEmail(
     const html = PLANTILLAS[tipo](cita, consultorio);
     const subject = ASUNTOS[tipo](consultorio.nombre, cita.fecha);
     const from = consultorio.email_remitente ?? 'notificaciones@toothx.app';
+
+    const resend = getResendClient();
+    if (!resend) {
+      console.warn('[Email] RESEND_API_KEY no configurada, omitiendo envío.');
+      return false;
+    }
 
     const { error } = await resend.emails.send({
       from: `${consultorio.nombre} <${from}>`,

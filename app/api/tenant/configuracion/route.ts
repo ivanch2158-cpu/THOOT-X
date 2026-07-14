@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
       UserRole.ODONTOLOGIST,
       UserRole.SECRETARY,
     ]);
-    if (!isValid) return response;
+    if (!isValid) return response!;
 
     const supabase = await createServerClient();
     const { data: tenant, error } = await supabase

@@ -8,7 +8,7 @@ import { createServerClient } from '@/lib/supabase/server';
 export async function POST(request: NextRequest) {
   try {
     const { isValid, user, response } = await protectEndpoint(request, [UserRole.ADMIN]);
-    if (!isValid) return response;
+    if (!isValid) return response!;
 
     const supabase = await createServerClient();
     const { error } = await supabase
