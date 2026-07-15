@@ -52,11 +52,14 @@ export async function POST(request: NextRequest) {
     });
 
     if (authError) {
+      // TEMPORAL: log completo para diagnóstico (retirar tras confirmar causa)
+      console.error('[Register] Supabase signUp error:', authError);
       return NextResponse.json(
         {
-          error: authError.message.includes('already registered')
+          error: authError.message.toLowerCase().includes('already registered')
             ? 'El email ya está registrado'
             : 'Error al crear la cuenta',
+          debug: authError.message,
         },
         { status: 400 }
       );
