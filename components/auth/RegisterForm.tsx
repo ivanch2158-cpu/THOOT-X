@@ -49,6 +49,7 @@ export function RegisterForm() {
         body: JSON.stringify({
           email: data.email,
           password: data.password,
+          passwordConfirm: data.passwordConfirm,
           fullName: data.fullName,
           tenantName: data.tenantName,
         }),
