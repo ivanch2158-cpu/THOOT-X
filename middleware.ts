@@ -98,6 +98,9 @@ export async function middleware(request: NextRequest) {
 }
 
 // Configurar qué rutas pasan por el middleware
+// Se excluyen las rutas de API porque cada endpoint valida su propia
+// autenticación con protectEndpoint() (incluye rutas públicas como
+// /api/auth/register, /api/auth/login, /api/cron/* con Bearer token, etc.)
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|public/).*)'],
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|public/).*)'],
 };
